@@ -67,19 +67,27 @@ class ScalingTransformer:
             X_processed = X.copy()
             
             for column, scaler in self.scalers.items():
-                X_processed[column] = scaler.transform(X[[column]]).flatten()
+                if column in X_processed.columns:
+                    # Ensure the column still exists and has the same shape
+                    if X_processed[column].shape[0] == X.shape[0]:
+                        X_processed[column] = scaler.transform(X[[column]]).flatten()
+                    else:
+                        logger.warning(f"Column {column} shape mismatch, skipping scaling")
+                else:
+                    logger.warning(f"Column {column} not found in data, skipping scaling")
             
             return X_processed
             
         except Exception as e:
             logger.error(f"Error transforming with ScalingTransformer: {e}")
-            raise
+            # Return original data if scaling fails
+            return X
 
 class FeatureEngineer:
     """Advanced feature engineering utilities"""
     
     def __init__(self, datetime_columns: Optional[List[str]] = None, 
-                 create_polynomial: bool = True, 
+                 create_polynomial: bool = False, 
                  create_interactions: bool = True):
         self.datetime_columns = datetime_columns or []
         self.create_polynomial = create_polynomial
@@ -130,14 +138,20 @@ class FeatureEngineer:
             if self.create_polynomial and self.polynomial_features is not None:
                 numeric_cols = X_processed.select_dtypes(include=[np.number]).columns
                 if len(numeric_cols) > 0:
-                    poly_features = self.polynomial_features.transform(X_processed[numeric_cols])
-                    poly_columns = self.polynomial_features.get_feature_names_out(numeric_cols)
-                    poly_df = pd.DataFrame(poly_features, columns=poly_columns, index=X_processed.index)
-                    
-                    # Add only interaction features (degree=2, interaction_only=True)
-                    interaction_cols = [col for col in poly_df.columns if '_' in col]
-                    if interaction_cols:
-                        X_processed = pd.concat([X_processed, poly_df[interaction_cols]], axis=1)
+                    try:
+                        poly_features = self.polynomial_features.transform(X_processed[numeric_cols])
+                        poly_columns = self.polynomial_features.get_feature_names_out(numeric_cols)
+                        poly_df = pd.DataFrame(poly_features, columns=poly_columns, index=X_processed.index)
+                        
+                        # Add only interaction features (degree=2, interaction_only=True)
+                        interaction_cols = [col for col in poly_df.columns if '_' in col]
+                        if interaction_cols:
+                            # Limit to avoid too many features
+                            interaction_cols = interaction_cols[:5]  # Limit to 5 interaction features
+                            X_processed = pd.concat([X_processed, poly_df[interaction_cols]], axis=1)
+                    except Exception as e:
+                        logger.warning(f"Error creating polynomial features: {e}")
+                        # Continue without polynomial features
             
             # Create custom interaction features
             if self.create_interactions:
@@ -155,18 +169,23 @@ class FeatureEngineer:
     def _create_interaction_features(self, X: pd.DataFrame) -> pd.DataFrame:
         """Create interaction features between highly correlated variables"""
         try:
-            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            X_processed = X.copy()
+            numeric_cols = X_processed.select_dtypes(include=[np.number]).columns
             if len(numeric_cols) < 2:
-                return X
+                return X_processed
             
             # Calculate correlations
-            corr_matrix = X[numeric_cols].corr()
-            high_corr_pairs = []
-            
-            for i in range(len(corr_matrix.columns)):
-                for j in range(i+1, len(corr_matrix.columns)):
-                    if abs(corr_matrix.iloc[i, j]) > 0.7:
-                        high_corr_pairs.append((corr_matrix.columns[i], corr_matrix.columns[j]))
+            try:
+                corr_matrix = X_processed[numeric_cols].corr()
+                high_corr_pairs = []
+                
+                for i in range(len(corr_matrix.columns)):
+                    for j in range(i+1, len(corr_matrix.columns)):
+                        if abs(corr_matrix.iloc[i, j]) > 0.7:
+                            high_corr_pairs.append((corr_matrix.columns[i], corr_matrix.columns[j]))
+            except Exception as e:
+                logger.warning(f"Error calculating correlations: {e}")
+                return X_processed
             
             # Create interaction features for highly correlated pairs
             for col1, col2 in high_corr_pairs[:3]:  # Limit to top 3 pairs
@@ -182,21 +201,22 @@ class FeatureEngineer:
     def _create_statistical_features(self, X: pd.DataFrame) -> pd.DataFrame:
         """Create statistical features"""
         try:
-            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            X_processed = X.copy()
+            numeric_cols = X_processed.select_dtypes(include=[np.number]).columns
             if len(numeric_cols) < 2:
-                return X
+                return X_processed
             
             # Row-wise statistics
-            X['numeric_mean'] = X[numeric_cols].mean(axis=1)
-            X['numeric_std'] = X[numeric_cols].std(axis=1)
-            X['numeric_max'] = X[numeric_cols].max(axis=1)
-            X['numeric_min'] = X[numeric_cols].min(axis=1)
-            X['numeric_range'] = X['numeric_max'] - X['numeric_min']
+            X_processed['numeric_mean'] = X_processed[numeric_cols].mean(axis=1)
+            X_processed['numeric_std'] = X_processed[numeric_cols].std(axis=1)
+            X_processed['numeric_max'] = X_processed[numeric_cols].max(axis=1)
+            X_processed['numeric_min'] = X_processed[numeric_cols].min(axis=1)
+            X_processed['numeric_range'] = X_processed['numeric_max'] - X_processed['numeric_min']
             
             # Count of non-zero values
-            X['non_zero_count'] = (X[numeric_cols] != 0).sum(axis=1)
+            X_processed['non_zero_count'] = (X_processed[numeric_cols] != 0).sum(axis=1)
             
-            return X
+            return X_processed
             
         except Exception as e:
             logger.warning(f"Error creating statistical features: {e}")

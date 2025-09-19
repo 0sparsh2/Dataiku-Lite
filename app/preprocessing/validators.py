@@ -166,9 +166,13 @@ class DataValidator:
             
             # Check for inconsistent data types within columns
             if X[col].dtype == 'object':
-                unique_types = X[col].apply(type).nunique()
-                if unique_types > 1:
-                    inconsistent_cols.append(col)
+                try:
+                    unique_types = X[col].apply(type).nunique()
+                    if unique_types > 1:
+                        inconsistent_cols.append(col)
+                except Exception:
+                    # Skip if there's an error checking types
+                    pass
         
         if mixed_type_cols or inconsistent_cols:
             return ValidationResult(

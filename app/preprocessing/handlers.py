@@ -125,11 +125,11 @@ class OutlierHandler:
             X_processed = X.copy()
             
             for column, info in self.outlier_info.items():
-                if info["outlier_count"] > 0:
+                if column in X_processed.columns and info["outlier_count"] > 0:
                     if action == "cap":
                         # Cap outliers at 95th percentile
-                        upper_cap = X[column].quantile(0.95)
-                        lower_cap = X[column].quantile(0.05)
+                        upper_cap = X_processed[column].quantile(0.95)
+                        lower_cap = X_processed[column].quantile(0.05)
                         X_processed[column] = X_processed[column].clip(lower_cap, upper_cap)
                     elif action == "remove":
                         # Remove outlier rows
@@ -271,13 +271,21 @@ class ScalingTransformer:
             X_processed = X.copy()
             
             for column, scaler in self.scalers.items():
-                X_processed[column] = scaler.transform(X[[column]]).flatten()
+                if column in X_processed.columns:
+                    # Ensure the column still exists and has the same shape
+                    if X_processed[column].shape[0] == X.shape[0]:
+                        X_processed[column] = scaler.transform(X[[column]]).flatten()
+                    else:
+                        logger.warning(f"Column {column} shape mismatch, skipping scaling")
+                else:
+                    logger.warning(f"Column {column} not found in data, skipping scaling")
             
             return X_processed
             
         except Exception as e:
             logger.error(f"Error transforming with ScalingTransformer: {e}")
-            raise
+            # Return original data if scaling fails
+            return X
 
 class FeatureEngineer:
     """Feature engineering utilities"""
