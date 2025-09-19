@@ -1,0 +1,10 @@
+@relation test_data
+@attribute name string
+@attribute age numeric
+@attribute city string
+@attribute salary numeric
+@data
+John,25,New York,50000
+Jane,30,London,60000
+Bob,35,Paris,70000
+Alice,28,Tokyo,55000
