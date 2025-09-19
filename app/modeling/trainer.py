@@ -51,10 +51,26 @@ class ModelTrainer:
         try:
             self._log("Starting classification model training")
             
-            # Split data
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=self.random_state, stratify=y
-            )
+            # Check if we can use stratified split
+            min_samples_per_class = y.value_counts().min()
+            can_stratify = min_samples_per_class >= 2 and len(y.unique()) > 1
+            
+            if can_stratify:
+                # Use stratified split if possible
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=self.random_state, stratify=y
+                )
+                self._log(f"Using stratified split (min samples per class: {min_samples_per_class})")
+            else:
+                # Use regular split if stratification not possible
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=self.random_state
+                )
+                self._log(f"Using regular split (min samples per class: {min_samples_per_class})")
+                
+                # Check if we have enough data for classification
+                if min_samples_per_class < 2:
+                    raise ValueError(f"Insufficient data for classification. Minimum 2 samples per class required, but found {min_samples_per_class} samples in the smallest class. Consider using regression or clustering instead.")
             
             # Define models
             models = self._get_classification_models()
@@ -167,7 +183,12 @@ class ModelTrainer:
         
         # Cross-validation
         if problem_type == "classification":
-            cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=self.random_state)
+            # Check if we can use stratified CV
+            min_samples_per_class = y_train.value_counts().min()
+            if min_samples_per_class >= 2 and len(y_train.unique()) > 1:
+                cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=self.random_state)
+            else:
+                cv = KFold(n_splits=cv_folds, shuffle=True, random_state=self.random_state)
         else:
             cv = KFold(n_splits=cv_folds, shuffle=True, random_state=self.random_state)
         
@@ -368,3 +389,30 @@ class ModelTrainer:
     def get_training_logs(self) -> List[Dict[str, Any]]:
         """Get training logs"""
         return self.training_logs
+    
+    def detect_problem_type(self, y: pd.Series) -> Dict[str, Any]:
+        """Detect the appropriate problem type based on target variable"""
+        analysis = {
+            "is_numeric": pd.api.types.is_numeric_dtype(y),
+            "unique_values": len(y.unique()),
+            "min_samples_per_class": y.value_counts().min() if len(y.unique()) > 1 else 0,
+            "suggested_type": None,
+            "warnings": []
+        }
+        
+        if analysis["is_numeric"]:
+            if analysis["unique_values"] <= 10 and analysis["min_samples_per_class"] >= 2:
+                analysis["suggested_type"] = "Classification"
+            elif analysis["unique_values"] > 10:
+                analysis["suggested_type"] = "Regression"
+            else:
+                analysis["suggested_type"] = "Clustering"
+                analysis["warnings"].append("Insufficient samples per class for classification. Consider clustering instead.")
+        else:
+            if analysis["min_samples_per_class"] >= 2:
+                analysis["suggested_type"] = "Classification"
+            else:
+                analysis["suggested_type"] = "Clustering"
+                analysis["warnings"].append("Insufficient samples per class for classification. Consider clustering instead.")
+        
+        return analysis

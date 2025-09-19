@@ -574,12 +574,44 @@ def model_training_page():
     X = st.session_state.processed_data
     y = st.session_state.target_data
     
-    # Problem type selection
+    # Problem type detection and selection
     st.markdown("### 🎯 Problem Type")
-    problem_type = st.selectbox(
-        "What type of problem are you solving?",
-        ["Classification", "Regression", "Clustering"]
-    )
+    
+    # Auto-detect problem type
+    if y is not None:
+        trainer = ModelTrainer()
+        problem_analysis = trainer.detect_problem_type(y)
+        
+        # Show analysis
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Unique Values", problem_analysis["unique_values"])
+            st.metric("Min Samples/Class", problem_analysis["min_samples_per_class"])
+        with col2:
+            st.metric("Is Numeric", "Yes" if problem_analysis["is_numeric"] else "No")
+            st.metric("Suggested Type", problem_analysis["suggested_type"])
+        
+        # Show warnings
+        if problem_analysis["warnings"]:
+            for warning in problem_analysis["warnings"]:
+                st.warning(f"⚠️ {warning}")
+        
+        # Problem type selection with suggestion
+        suggested_type = problem_analysis["suggested_type"]
+        problem_type = st.selectbox(
+            "What type of problem are you solving?",
+            ["Classification", "Regression", "Clustering"],
+            index=["Classification", "Regression", "Clustering"].index(suggested_type) if suggested_type in ["Classification", "Regression", "Clustering"] else 0
+        )
+        
+        # Show additional info
+        if problem_type == "Classification" and problem_analysis["min_samples_per_class"] < 2:
+            st.error("❌ Classification requires at least 2 samples per class. Consider using Regression or Clustering instead.")
+    else:
+        problem_type = st.selectbox(
+            "What type of problem are you solving?",
+            ["Classification", "Regression", "Clustering"]
+        )
     
     # Training configuration
     col1, col2 = st.columns(2)
@@ -599,6 +631,12 @@ def model_training_page():
                 trainer = ModelTrainer(random_state=random_state)
                 
                 if problem_type == "Classification" and y is not None:
+                    # Check if classification is possible
+                    min_samples = y.value_counts().min()
+                    if min_samples < 2:
+                        st.error(f"❌ Classification not possible: minimum 2 samples per class required, but found {min_samples} samples in smallest class.")
+                        st.info("💡 Try using Regression or Clustering instead.")
+                        return
                     results = trainer.train_classification_models(X, y, test_size, cv_folds)
                 elif problem_type == "Regression" and y is not None:
                     results = trainer.train_regression_models(X, y, test_size, cv_folds)
